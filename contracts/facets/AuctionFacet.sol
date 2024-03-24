@@ -139,8 +139,8 @@ contract AuctionFacet {
         LibAppStorage.AppStorage storage a = LibAppStorage.getStorage();
         LibAuctionStorage.Auction storage auction = s.auctions[_auctionId];
 
-        require(auction.endAuction > block.timestamp, "Auction ongoing");
-        require(auction.isOpen, "Not winner");
+        require(auction.isOpen, "Nft Claimed");
+        require(block.timestamp >= auction.endAuction, "Auction ongoing");
         require(msg.sender == auction.currentBidOwner, "Not winner");
 
         IERC721 nftContract = IERC721(auction.addressNFTCollection);

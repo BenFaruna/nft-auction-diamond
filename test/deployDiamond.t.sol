@@ -96,6 +96,7 @@ contract DiamondDeployer is Test, IDiamondCut {
 
         AUCFacet(address(diamond)).mint(A, 100e18);
         AUCFacet(address(diamond)).mint(B, 200e18);
+        AUCFacet(address(diamond)).mint(C, 10e18);
     }
 
     function testAUCFacetConnection() public {
@@ -110,7 +111,7 @@ contract DiamondDeployer is Test, IDiamondCut {
         AUCFacet a = AUCFacet(address(diamond));
 
         a.mint(C, 120e18);
-        assertEq(a.balanceOf(C), 120e18);
+        assertEq(a.balanceOf(C), 130e18);
     }
 
     function testAUCMintRevertWithNotOwnerCall() public {
@@ -313,7 +314,154 @@ contract DiamondDeployer is Test, IDiamondCut {
         assertEq(erc20.balanceOf(DAO_ADDRESS), 2e16);
         assertEq(erc20.balanceOf(TEAM_ADDRESS), 2e16);
         assertEq(erc20.balanceOf(B), 200.03e18);
-        assertEq(erc20.balanceOf(C), 0.01e18);
+        assertEq(erc20.balanceOf(C), 10.01e18);
+    }
+
+    function testNftClaimFailBeforeEndTime() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+
+        switchSigner(B);
+
+        AUCFacet erc20 = AUCFacet(address(diamond));
+        uint256 totalSupply = erc20.totalSupply();
+
+        erc20.approve(address(diamond), 1e18);
+
+        a.BidOnAuction(0, 1e18);
+
+        switchSigner(C);
+        erc20.approve(address(diamond), 2e18);
+        a.BidOnAuction(0, 2e18);
+
+        vm.expectRevert("Auction ongoing");
+        a.claimNFT(0);
+    }
+
+    function testNftClaimFailWhenNotWinner() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+
+        switchSigner(B);
+
+        AUCFacet erc20 = AUCFacet(address(diamond));
+        uint256 totalSupply = erc20.totalSupply();
+
+        erc20.approve(address(diamond), 1e18);
+
+        a.BidOnAuction(0, 1e18);
+
+        switchSigner(C);
+        erc20.approve(address(diamond), 2e18);
+        a.BidOnAuction(0, 2e18);
+
+        vm.warp(4 days);
+
+        switchSigner(B);
+
+        vm.expectRevert("Not winner");
+        a.claimNFT(0);
+    }
+
+    function testNftClaimFailOnDoubleClaim() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+
+        switchSigner(B);
+
+        AUCFacet erc20 = AUCFacet(address(diamond));
+        uint256 totalSupply = erc20.totalSupply();
+
+        erc20.approve(address(diamond), 1e18);
+
+        a.BidOnAuction(0, 1e18);
+
+        switchSigner(C);
+        erc20.approve(address(diamond), 2e18);
+        a.BidOnAuction(0, 2e18);
+
+        vm.warp(4 days);
+
+        a.claimNFT(0);
+
+        vm.expectRevert("Nft Claimed");
+        a.claimNFT(0);
+    }
+
+    function testNftClaimOnWin() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+
+        switchSigner(B);
+
+        AUCFacet erc20 = AUCFacet(address(diamond));
+        uint256 totalSupply = erc20.totalSupply();
+
+        erc20.approve(address(diamond), 1e18);
+
+        a.BidOnAuction(0, 1e18);
+
+        switchSigner(C);
+        erc20.approve(address(diamond), 2e18);
+        a.BidOnAuction(0, 2e18);
+
+        vm.warp(4 days);
+
+        vm.expectEmit(false, false, false, false);
+        emit LibAuctionStorage.AuctionEnded(0, C, 2e18);
+        a.claimNFT(0);
     }
 
     function mkaddr(string memory name) public returns (address) {
