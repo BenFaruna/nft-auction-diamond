@@ -77,7 +77,6 @@ contract AUCFacet {
         address recipient,
         uint256 amount
     ) internal returns (bool) {
-        require(recipient != address(0), "ERC20: transfer to the zero address");
         require(
             s.balances[sender] >= amount,
             "ERC20: transfer amount exceeds balance"
@@ -103,9 +102,8 @@ contract AUCFacet {
             s.balances[account] >= amount,
             "ERC20: burn amount exceeds balance"
         );
-        s.balances[account] -= amount;
         s.totalSupply -= amount;
-        emit Transfer(account, address(0), amount);
+        _transfer(account, address(0), amount);
     }
 
     function _approve(
@@ -114,7 +112,7 @@ contract AUCFacet {
         uint256 amount
     ) internal returns (bool) {
         require(spender != address(0), "ERC20: approve to the zero address");
-        s.allowances[owner][spender] = amount;
+        s.allowances[owner][spender] = s.allowances[owner][spender] + amount;
         s.lastInteraction = msg.sender;
         emit Approval(owner, spender, amount);
         return true;

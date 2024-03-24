@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
+import "../contracts/interfaces/IERC721.sol";
+
 import "../contracts/interfaces/IDiamondCut.sol";
 import "../contracts/facets/DiamondCutFacet.sol";
 import "../contracts/facets/DiamondLoupeFacet.sol";
@@ -11,6 +13,11 @@ import "../contracts/Diamond.sol";
 import "../contracts/libraries/LibDiamond.sol";
 
 import "../contracts/facets/AUCFacet.sol";
+import "../contracts/facets/AuctionFacet.sol";
+
+import "../contracts/NFTOnChain.sol";
+
+import "../contracts/libraries/LibAuctionStorage.sol";
 
 contract DiamondDeployer is Test, IDiamondCut {
     //contract types of facets to be deployed
@@ -18,11 +25,17 @@ contract DiamondDeployer is Test, IDiamondCut {
     DiamondCutFacet dCutFacet;
     DiamondLoupeFacet dLoupe;
     OwnershipFacet ownerF;
-    AUCFacet aucF;
+    AUCFacet aucTokenF;
+    AuctionFacet auctionF;
+
+    NFTOnChain nftOnChain;
 
     address A = address(0xa);
     address B = address(0xb);
     address C = address(0xc);
+
+    address DAO_ADDRESS = 0xdD2FD4581271e230360230F9337D5c0430Bf44C0;
+    address TEAM_ADDRESS = 0xb2b2130b4B83Af141cFc4C5E3dEB1897eB336D79;
 
     function setUp() public {
         //deploy facets
@@ -30,12 +43,15 @@ contract DiamondDeployer is Test, IDiamondCut {
         diamond = new Diamond(address(this), address(dCutFacet));
         dLoupe = new DiamondLoupeFacet();
         ownerF = new OwnershipFacet();
-        aucF = new AUCFacet();
+        aucTokenF = new AUCFacet();
+        auctionF = new AuctionFacet();
+
+        nftOnChain = new NFTOnChain();
 
         //upgrade diamond with facets
 
         //build cut struct
-        FacetCut[] memory cut = new FacetCut[](3);
+        FacetCut[] memory cut = new FacetCut[](4);
 
         cut[0] = (
             FacetCut({
@@ -55,12 +71,19 @@ contract DiamondDeployer is Test, IDiamondCut {
 
         cut[2] = (
             FacetCut({
-                facetAddress: address(aucF),
+                facetAddress: address(aucTokenF),
                 action: FacetCutAction.Add,
                 functionSelectors: generateSelectors("AUCFacet")
             })
         );
 
+        cut[3] = (
+            FacetCut({
+                facetAddress: address(auctionF),
+                action: FacetCutAction.Add,
+                functionSelectors: generateSelectors("AuctionFacet")
+            })
+        );
         //upgrade diamond
         IDiamondCut(address(diamond)).diamondCut(cut, address(0x0), "");
 
@@ -140,6 +163,157 @@ contract DiamondDeployer is Test, IDiamondCut {
         switchSigner(B);
         vm.expectRevert("Not enough allowance");
         a.transferFrom(A, address(diamond), 100e18);
+    }
+
+    function testCreate721Auction() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        assertEq(nftContract.ownerOf(0), A);
+
+        vm.expectEmit(false, false, false, false);
+        emit LibAuctionStorage.AuctionCreated(
+            0,
+            address(nftOnChain),
+            0,
+            A,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+    }
+
+    function testGetAuctionDetails() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+
+        (
+            address currentBidOwner,
+            uint256 currentBidPrice,
+            uint256 endAuction,
+            bool isOpen
+        ) = a.getAuctionDetails(0);
+
+        assertEq(address(0), currentBidOwner);
+        assertEq(0.5e18, currentBidPrice);
+        assertEq(block.timestamp + 3 days, endAuction);
+        assertEq(true, isOpen);
+    }
+
+    function testCreate721AuctionFailWithoutApproval() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+
+        vm.expectRevert("Contract not approved");
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+    }
+
+    function testBidOnAuction() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+
+        switchSigner(B);
+
+        AUCFacet erc20 = AUCFacet(address(diamond));
+        erc20.approve(address(diamond), 1e18);
+
+        a.BidOnAuction(0, 1e18);
+
+        (address currentBidOwner, uint256 currentBidPrice, , ) = a
+            .getAuctionDetails(0);
+
+        assertEq(B, currentBidOwner);
+        assertEq(1e18, currentBidPrice);
+    }
+
+    function testBidTransfersFundsAppropriately() public {
+        AuctionFacet a = AuctionFacet(address(diamond));
+        switchSigner(A);
+
+        IERC721 nftContract = IERC721(address(nftOnChain));
+
+        nftContract.mint();
+        nftContract.approve(address(diamond), 0);
+
+        a.create721Auction(
+            LibAuctionStorage.Categories.ERC721,
+            address(nftOnChain),
+            0,
+            block.timestamp + 3 days,
+            0.5e18
+        );
+
+        switchSigner(B);
+
+        AUCFacet erc20 = AUCFacet(address(diamond));
+        uint256 totalSupply = erc20.totalSupply();
+
+        erc20.approve(address(diamond), 1e18);
+
+        a.BidOnAuction(0, 1e18);
+
+        switchSigner(A);
+        erc20.approve(address(diamond), 2e18);
+
+        // last interaction before bid
+        switchSigner(C);
+        erc20.approve(address(diamond), 10e18);
+
+        switchSigner(A);
+        a.BidOnAuction(0, 2e18);
+
+        assertEq(erc20.balanceOf(address(0)), 2e16);
+        assertEq(erc20.balanceOf(DAO_ADDRESS), 2e16);
+        assertEq(erc20.balanceOf(TEAM_ADDRESS), 2e16);
+        assertEq(erc20.balanceOf(B), 200.03e18);
+        assertEq(erc20.balanceOf(C), 0.01e18);
     }
 
     function mkaddr(string memory name) public returns (address) {
